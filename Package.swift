@@ -6,16 +6,26 @@ import PackageDescription
 let package = Package(
     name: "GithubReleaseChecker",
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
             name: "GithubReleaseChecker",
             targets: ["GithubReleaseChecker"]),
     ],
+    dependencies: [
+        // 引入 SwiftUIWindow 库
+        .package(url: "https://github.com/boybeak/SwiftUIWindow.git", from: "0.0.1"),
+        
+        // 引入 Ink 库
+        .package(url: "https://github.com/JohnSundell/Ink.git", from: "0.6.0"),
+    ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "GithubReleaseChecker"),
+            name: "GithubReleaseChecker",
+            dependencies: [
+                // 添加依赖
+                .product(name: "SwiftUIWindow", package: "SwiftUIWindow"),
+                .product(name: "Ink", package: "Ink")
+            ]
+        ),
         .testTarget(
             name: "GithubReleaseCheckerTests",
             dependencies: ["GithubReleaseChecker"]

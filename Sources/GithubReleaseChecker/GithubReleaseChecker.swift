@@ -1,6 +1,7 @@
-// The Swift Programming Language
-// https://docs.swift.org/swift-book
 import Foundation
+import SwiftUICore
+import AppKit
+import SwiftUIWindow
 
 public struct ReleaseInfo: Decodable {
     public let tagName: String
@@ -16,6 +17,7 @@ public struct ReleaseInfo: Decodable {
     }
 }
 
+@available(macOS 10.15, *)
 public class GithubReleaseChecker : @unchecked Sendable {
     public typealias CheckResultCallback = @Sendable (Result<(newVersion: ReleaseInfo?, hasUpdate: Bool), Error>) -> Void
 
@@ -39,20 +41,35 @@ public class GithubReleaseChecker : @unchecked Sendable {
         case cantGetCurrentVersion
     }
 
-    public func checkUpdate(for input: InputType, onCheckResult: @escaping CheckResultCallback) {
+    public func checkUpdate(for input: InputType, showDefaultUI: Bool = false, onCheckResult: @escaping CheckResultCallback) {
+        // 如果 showDefault 为 true，显示等待窗口
+        var progressIndicator: NSWindow? = nil
+        if showDefaultUI {
+            progressIndicator = showLoadingIndicator()
+        }
+
         guard let currentVersion = getCurrentAppVersion() else {
             onCheckResult(.failure(CheckerError.cantGetCurrentVersion))
+            DispatchQueue.main.async {
+                progressIndicator?.close()
+            }
             return
         }
 
         guard let apiURL = buildAPIURL(from: input) else {
             onCheckResult(.failure(CheckerError.invalidInput))
+            DispatchQueue.main.async {
+                progressIndicator?.close()
+            }
             return
         }
 
         let task = session.dataTask(with: apiURL) { (data, response, error) in
             if let error = error {
                 onCheckResult(.failure(CheckerError.networkError(error)))
+                DispatchQueue.main.async {
+                    progressIndicator?.close()
+                }
                 return
             }
 
@@ -60,27 +77,51 @@ public class GithubReleaseChecker : @unchecked Sendable {
                   (200...299).contains(httpResponse.statusCode),
                   let data = data else {
                 onCheckResult(.failure(CheckerError.invalidResponse))
+                DispatchQueue.main.async {
+                    progressIndicator?.close()
+                }
                 return
             }
 
             do {
                 let decoder = JSONDecoder()
-//                decoder.keyDecodingStrategy = .convertFromSnakeCase
                 let releases = try decoder.decode([ReleaseInfo].self, from: data)
 
                 guard let latestRelease = releases.first else {
                     onCheckResult(.failure(CheckerError.noReleases))
+                    DispatchQueue.main.async {
+                        progressIndicator?.close()
+                    }
                     return
                 }
 
                 let hasUpdate = self.compareVersions(currentVersion, latestRelease.tagName)
                 let result:(ReleaseInfo?, Bool) = hasUpdate ? (latestRelease, true) : (nil, false)
                 onCheckResult(.success((result.0,result.1)))
+                DispatchQueue.main.async {
+                    progressIndicator?.close()
+                }
             } catch {
                 onCheckResult(.failure(error))
+                DispatchQueue.main.async {
+                    progressIndicator?.close()
+                }
             }
         }
         task.resume()
+    }
+
+    private func showLoadingIndicator() -> NSWindow {
+        let window = openSwiftUIWindow { win in
+            ReleaseView()
+                .frame(width: 200, height: 200)
+        }
+        DispatchQueue.main.async {
+            window.level = .floating
+            window.center()
+        }
+        
+        return window
     }
 
     private func buildAPIURL(from input: InputType) -> URL? {
@@ -113,10 +154,22 @@ public class GithubReleaseChecker : @unchecked Sendable {
     }
 
     private func compareVersions(_ currentVersion: String, _ latestVersion: String) -> Bool {
-        // 实现版本比较逻辑，推荐使用 swift-semver 等库
-        // 简单的主要版本比较示例：
+        // 简单的主要版本比较示例
         guard let currentMajor = Int(currentVersion.components(separatedBy: ".").first ?? "0"),
               let latestMajor = Int(latestVersion.components(separatedBy: ".").first ?? "0") else { return false }
         return latestMajor > currentMajor
+    }
+}
+
+
+@available(macOS 10.15, *)
+struct ReleaseView : View {
+    var body: some View {
+        ZStack {
+            
+        }
+        .background(Color.red)
+        .frame(width: 200, height: 200)
+        .background(Color.red)
     }
 }
