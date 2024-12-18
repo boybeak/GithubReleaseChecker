@@ -20,7 +20,6 @@ public struct ReleaseInfo: Decodable {
 
 @available(macOS 11, *)
 public class GithubReleaseChecker : @unchecked Sendable {
-    public typealias CheckResultCallback = @Sendable (Result<(newVersion: ReleaseInfo?, hasUpdate: Bool), Error>) -> Void
 
     private let session: URLSession
     private let releaseVM = ReleaseVM()
@@ -53,7 +52,7 @@ public class GithubReleaseChecker : @unchecked Sendable {
         case cantGetCurrentVersion
     }
 
-    public func checkUpdate(for input: InputType, showDefaultUI: Bool = false, onCheckResult: @escaping CheckResultCallback) {
+    public func checkUpdate(for input: InputType, showDefaultUI: Bool = false, onCheckResult: @escaping @Sendable (Result<(newVersion: ReleaseInfo, hasUpdate: Bool), Error>) -> Void) {
         var progressIndicator: NSWindow? = nil
         if showDefaultUI {
             progressIndicator = showLoadingIndicator()
@@ -107,7 +106,7 @@ public class GithubReleaseChecker : @unchecked Sendable {
                 // 使用 versionComparator 来判断是否有更新
                 let hasUpdate = self.versionComparator?(currentVersion, latestRelease) ?? false
                 let result: (ReleaseInfo?, Bool) = hasUpdate ? (latestRelease, true) : (nil, false)
-                onCheckResult(.success((result.0, result.1)))
+                onCheckResult(.success((result.0!, result.1)))
 
                 DispatchQueue.main.async {
                     self.releaseVM.releaseInfo = latestRelease
