@@ -1,30 +1,40 @@
 import Foundation
-import SwiftUICore
+import SwiftUI
 import AppKit
 import SwiftUIWindow
+import WebKit
+import Ink
 
 public struct ReleaseInfo: Decodable {
     public let tagName: String
     public let name: String?
-    public let body: String?
+    public let log: String?
     public let htmlUrl: String // 下载链接地址
 
     enum CodingKeys: String, CodingKey {
         case tagName = "tag_name"
         case name
-        case body
+        case log = "body"
         case htmlUrl = "html_url"
     }
 }
 
-@available(macOS 10.15, *)
+@available(macOS 11, *)
 public class GithubReleaseChecker : @unchecked Sendable {
     public typealias CheckResultCallback = @Sendable (Result<(newVersion: ReleaseInfo?, hasUpdate: Bool), Error>) -> Void
 
     private let session: URLSession
+    private let releaseVM = ReleaseVM()
+
+    // 新增的版本比较器属性
+    public var versionComparator: ((String, ReleaseInfo) -> Bool)?
 
     public init(session: URLSession = .shared) {
         self.session = session
+        // 设置默认版本比较器
+        self.versionComparator = { currentVersion, latestRelease in
+            return self.compareVersions(currentVersion, latestRelease.tagName)
+        }
     }
 
     public enum InputType {
@@ -42,11 +52,11 @@ public class GithubReleaseChecker : @unchecked Sendable {
     }
 
     public func checkUpdate(for input: InputType, showDefaultUI: Bool = false, onCheckResult: @escaping CheckResultCallback) {
-        // 如果 showDefault 为 true，显示等待窗口
         var progressIndicator: NSWindow? = nil
         if showDefaultUI {
             progressIndicator = showLoadingIndicator()
         }
+        releaseVM.isLoading = true
 
         guard let currentVersion = getCurrentAppVersion() else {
             onCheckResult(.failure(CheckerError.cantGetCurrentVersion))
@@ -65,10 +75,14 @@ public class GithubReleaseChecker : @unchecked Sendable {
         }
 
         let task = session.dataTask(with: apiURL) { (data, response, error) in
+            DispatchQueue.main.async {
+                self.releaseVM.isLoading = false
+            }
+
             if let error = error {
                 onCheckResult(.failure(CheckerError.networkError(error)))
                 DispatchQueue.main.async {
-                    progressIndicator?.close()
+                    // progressIndicator?.close()
                 }
                 return
             }
@@ -78,33 +92,31 @@ public class GithubReleaseChecker : @unchecked Sendable {
                   let data = data else {
                 onCheckResult(.failure(CheckerError.invalidResponse))
                 DispatchQueue.main.async {
-                    progressIndicator?.close()
+                    self.releaseVM.error = CheckerError.invalidResponse
+                    // progressIndicator?.close()
                 }
                 return
             }
 
             do {
                 let decoder = JSONDecoder()
-                let releases = try decoder.decode([ReleaseInfo].self, from: data)
+                let latestRelease = try decoder.decode(ReleaseInfo.self, from: data)
 
-                guard let latestRelease = releases.first else {
-                    onCheckResult(.failure(CheckerError.noReleases))
-                    DispatchQueue.main.async {
-                        progressIndicator?.close()
-                    }
-                    return
-                }
+                // 使用 versionComparator 来判断是否有更新
+                let hasUpdate = self.versionComparator?(currentVersion, latestRelease) ?? false
+                let result: (ReleaseInfo?, Bool) = hasUpdate ? (latestRelease, true) : (nil, false)
+                onCheckResult(.success((result.0, result.1)))
 
-                let hasUpdate = self.compareVersions(currentVersion, latestRelease.tagName)
-                let result:(ReleaseInfo?, Bool) = hasUpdate ? (latestRelease, true) : (nil, false)
-                onCheckResult(.success((result.0,result.1)))
                 DispatchQueue.main.async {
-                    progressIndicator?.close()
+                    self.releaseVM.releaseInfo = latestRelease
+                    self.releaseVM.hasUpdate = hasUpdate
+                    // progressIndicator?.close()
                 }
             } catch {
                 onCheckResult(.failure(error))
                 DispatchQueue.main.async {
-                    progressIndicator?.close()
+                    self.releaseVM.error = error
+                    // progressIndicator?.close()
                 }
             }
         }
@@ -113,14 +125,14 @@ public class GithubReleaseChecker : @unchecked Sendable {
 
     private func showLoadingIndicator() -> NSWindow {
         let window = openSwiftUIWindow { win in
-            ReleaseView()
-                .frame(width: 200, height: 200)
+            ReleaseView(vm: self.releaseVM)
+                .frame(width: 400, height: 300)
         }
         DispatchQueue.main.async {
+            window.styleMask = [.closable, .titled]
             window.level = .floating
             window.center()
         }
-        
         return window
     }
 
@@ -130,9 +142,9 @@ public class GithubReleaseChecker : @unchecked Sendable {
             let pathComponents = url.pathComponents.dropFirst(2).prefix(2)
             let repoPath = pathComponents.joined(separator: "/")
             guard !repoPath.isEmpty else { return nil }
-            return URL(string: "https://api.github.com/repos/\(repoPath)/releases")
+            return URL(string: "https://api.github.com/repos/\(repoPath)/releases/latest")
         case .userRepo(let userRepo):
-            return URL(string: "https://api.github.com/repos/\(userRepo)/releases")
+            return URL(string: "https://api.github.com/repos/\(userRepo)/releases/latest")
         case .gitUrl(let url):
             let pathComponents = url.absoluteString
                 .replacingOccurrences(of: ".git", with: "")
@@ -141,7 +153,7 @@ public class GithubReleaseChecker : @unchecked Sendable {
 
             let repoPath = pathComponents.joined(separator: "/")
             guard !repoPath.isEmpty else { return nil }
-            return URL(string: "https://api.github.com/repos/\(repoPath)/releases")
+            return URL(string: "https://api.github.com/repos/\(repoPath)/releases/latest")
         }
     }
 
@@ -154,7 +166,7 @@ public class GithubReleaseChecker : @unchecked Sendable {
     }
 
     private func compareVersions(_ currentVersion: String, _ latestVersion: String) -> Bool {
-        // 简单的主要版本比较示例
+        // 默认的版本比较：比较主版本号
         guard let currentMajor = Int(currentVersion.components(separatedBy: ".").first ?? "0"),
               let latestMajor = Int(latestVersion.components(separatedBy: ".").first ?? "0") else { return false }
         return latestMajor > currentMajor
@@ -162,14 +174,112 @@ public class GithubReleaseChecker : @unchecked Sendable {
 }
 
 
+
 @available(macOS 10.15, *)
+class ReleaseVM : ObservableObject {
+    @Published var isLoading: Bool = false
+    @Published var releaseInfo: ReleaseInfo? = nil
+    @Published var error: (any Error)? = nil
+    @Published var hasUpdate: Bool = false
+    
+    @Published var isUpdating: Bool = false
+    @Published var progress: Float = 0
+    @Published var max: Float = 100
+}
+
+@available(macOS 11, *)
 struct ReleaseView : View {
+    
+    @StateObject var vm: ReleaseVM
+    
     var body: some View {
         ZStack {
+            if vm.isLoading {
+                ProgressView()
+                    .progressViewStyle(.circular)
+            }
+            
+            if let error = vm.error {
+                Text(error.localizedDescription)
+            }
+            
+            if let release = vm.releaseInfo {
+                VStack(
+                    spacing: 0
+                ) {
+                    let html = MarkdownParser().parse(release.log ?? "Empty log").html
+                    HTMLWebView(htmlString: """
+                                <!DOCTYPE html>
+                                <html>
+                                <head>
+                                </head>
+                                <body>
+                                    <h1>\(vm.releaseInfo?.tagName ?? "")</h1>
+                                    \(html)
+                                </body>
+                                </html>
+                            """)
+                    if vm.hasUpdate {
+                        ZStack {
+                            ProgressView(value: vm.progress, total: 100)
+                                .progressViewStyle(.circular)
+                            Button(action: {
+                                vm.progress += 1
+                            }) {
+                                Image(systemName: "arrowshape.up.circle.fill")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 24, height: 24)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        .padding(.vertical, 8)
+                        
+                    } else {
+                        Button(action: {
+                            print("按钮被点击了")
+                        }) {
+                            Image(systemName: "checkmark.circle.fill")
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+            }
             
         }
-        .background(Color.red)
-        .frame(width: 200, height: 200)
-        .background(Color.red)
+        .frame(width: 400, height: 300)
+    }
+}
+
+@available(macOS 10.15, *)
+struct HTMLWebView: NSViewRepresentable {
+    let htmlString: String
+
+    func makeNSView(context: Context) -> WKWebView {
+        let webView = WKWebView()
+        webView.navigationDelegate = context.coordinator
+        webView.loadHTMLString(htmlString, baseURL: nil)
+        return webView
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        // 仅在需要时更新 HTML 内容
+        if nsView.url == nil || nsView.url?.absoluteString != "about:blank" {
+            nsView.loadHTMLString(htmlString, baseURL: nil)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        return Coordinator()
+    }
+
+    class Coordinator: NSObject, WKNavigationDelegate {
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            print("WebView navigation failed: \(error.localizedDescription)")
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            print("WebView provisional navigation failed: \(error.localizedDescription)")
+        }
     }
 }
