@@ -3,7 +3,6 @@ import SwiftUI
 import AppKit
 import SwiftUIWindow
 import WebKit
-import Ink
 
 public struct ReleaseInfo: Decodable {
     public let tagName: String
@@ -25,6 +24,9 @@ public class GithubReleaseChecker : @unchecked Sendable {
 
     private let session: URLSession
     private let releaseVM = ReleaseVM()
+    
+    public var width: CGFloat = 360
+    public var height: CGFloat = 480
 
     // 新增的版本比较器属性
     public var versionComparator: ((String, ReleaseInfo) -> Bool)?
@@ -126,7 +128,7 @@ public class GithubReleaseChecker : @unchecked Sendable {
     private func showLoadingIndicator() -> NSWindow {
         let window = openSwiftUIWindow { win in
             ReleaseView(vm: self.releaseVM)
-                .frame(width: 400, height: 300)
+                .frame(width: self.width, height: self.height)
         }
         DispatchQueue.main.async {
             window.styleMask = [.closable, .titled]
@@ -181,10 +183,6 @@ class ReleaseVM : ObservableObject {
     @Published var releaseInfo: ReleaseInfo? = nil
     @Published var error: (any Error)? = nil
     @Published var hasUpdate: Bool = false
-    
-    @Published var isUpdating: Bool = false
-    @Published var progress: Float = 0
-    @Published var max: Float = 100
 }
 
 @available(macOS 11, *)
@@ -207,47 +205,67 @@ struct ReleaseView : View {
                 VStack(
                     spacing: 0
                 ) {
-                    let html = MarkdownParser().parse(release.log ?? "Empty log").html
-                    HTMLWebView(htmlString: """
-                                <!DOCTYPE html>
-                                <html>
-                                <head>
-                                </head>
-                                <body>
-                                    <h1>\(vm.releaseInfo?.tagName ?? "")</h1>
-                                    \(html)
-                                </body>
-                                </html>
-                            """)
+                    HTMLWebView(htmlString:
+                                    """
+                                    <!DOCTYPE html>
+                                    <html lang="en">
+                                    <head>
+                                      <meta charset="UTF-8">
+                                      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                      <title>Markdown Preview</title>
+                                      <!-- 使用最新版本的 Marked.js -->
+                                      <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+                                      <style>
+                                        body { font-family: Arial, sans-serif; margin: 20px; }
+                                        pre, code { background-color: #f4f4f4; padding: 10px; border-radius: 5px; }
+                                      </style>
+                                    </head>
+                                    <body>
+                                      <div id="markdown-content"></div>
+                                      <script>
+                                        // 这里是你要渲染的 Markdown 内容
+                                        const markdown = `# \(release.tagName) \n \(release.log)`;
+
+                                        // 使用 Marked.js 的 parse 方法来将 Markdown 转换为 HTML
+                                        document.getElementById('markdown-content').innerHTML = marked.parse(markdown);
+                                      </script>
+                                    </body>
+                                    </html>
+                                    """
+                    )
+//                    HTMLWebView(htmlString: """
+//                                <!DOCTYPE html>
+//                                <html>
+//                                <head>
+//                                </head>
+//                                <body>
+//                                    <h1>\(vm.releaseInfo?.tagName ?? "")</h1>
+//                                    \(html)
+//                                </body>
+//                                </html>
+//                            """)
                     if vm.hasUpdate {
-                        ZStack {
-                            ProgressView(value: vm.progress, total: 100)
-                                .progressViewStyle(.circular)
-                            Button(action: {
-                                vm.progress += 1
-                            }) {
-                                Image(systemName: "arrowshape.up.circle.fill")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 24, height: 24)
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                        .padding(.vertical, 8)
-                        
-                    } else {
                         Button(action: {
-                            print("按钮被点击了")
+                            if let url = URL(string: release.htmlUrl) {
+                                NSWorkspace.shared.open(url)
+                            }
                         }) {
-                            Image(systemName: "checkmark.circle.fill")
+                            Image(systemName: "arrowshape.up.circle.fill")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 24, height: 24)
                         }
-                        .padding(.vertical, 8)
+                        .buttonStyle(.borderless)
+                        .padding(8)
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .padding(4)
                     }
                 }
             }
             
         }
-        .frame(width: 400, height: 300)
+//        .frame(width: 400, height: 300)
     }
 }
 

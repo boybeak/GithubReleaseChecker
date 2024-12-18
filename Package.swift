@@ -13,9 +13,6 @@ let package = Package(
     dependencies: [
         // 引入 SwiftUIWindow 库
         .package(url: "https://github.com/boybeak/SwiftUIWindow.git", from: "0.0.1"),
-        
-        // 引入 Ink 库
-        .package(url: "https://github.com/JohnSundell/Ink.git", from: "0.6.0"),
     ],
     targets: [
         .target(
@@ -23,7 +20,6 @@ let package = Package(
             dependencies: [
                 // 添加依赖
                 .product(name: "SwiftUIWindow", package: "SwiftUIWindow"),
-                .product(name: "Ink", package: "Ink")
             ]
         ),
         .testTarget(
